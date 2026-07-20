@@ -4,35 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visor de Avistamiento 3DGS - Aves</title>
+    <!-- Cargamos la versión estable del motor de PlayCanvas -->
     <script src="https://playcanvas.com"></script>
     <style>
         body { margin: 0; padding: 0; background-color: #0d0d0d; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; }
         #loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-family: sans-serif; color: #aaa; font-size: 1rem; pointer-events: none;
-            z-index: 10;
+            font-family: sans-serif; color: #fff; font-size: 1.1rem; pointer-events: none;
+            background: rgba(0,0,0,0.7); padding: 15px 25px; border-radius: 8px; z-index: 10;
         }
     </style>
 </head>
 <body>
-    <div id="loading">Cargando relieve del ave...</div>
+    <div id="loading">Descargando y procesando relieve del ave (Gaussian Splat)...</div>
     <canvas id="application-canvas"></canvas>
 
     <script>
-        // 1. CAPTURA DINÁMICA: Resolver ruta absoluta limpia
+        // 1. OBTENER PARÁMETROS DE LA URL
         const urlParams = new URLSearchParams(window.location.search);
         const rutaModelo = urlParams.get('ruta');
         
         if (!rutaModelo) {
-            document.getElementById("loading").innerText = "Falta el parámetro '?ruta=' en la URL";
-            throw new Error("Parámetro ruta ausente.");
+            document.getElementById("loading").innerText = "Error: Falta el parámetro '?ruta='";
+            throw new Error("Parámetro 'ruta' ausente.");
         }
 
-        // Construye la URL apuntando correctamente al archivo de tu servidor local o GitHub Pages
+        // Construir la URL absoluta apuntando a tu GitHub Pages
         const urlDelModelo = window.location.origin + window.location.pathname.replace('index.html', '') + rutaModelo;
 
-        // Inicializar PlayCanvas
+        // 2. INICIALIZAR PLAYCANVAS
         const canvas = document.getElementById("application-canvas");
         const app = new pc.Application(canvas, {
             mouse: new pc.Mouse(document.body),
@@ -44,52 +45,78 @@
 
         app.scene.toneMapping = pc.TONEMAP_ACES;
 
-        // 2. CREAR CÁMARA
+        // 3. CONFIGURAR LA CÁMARA
         const camera = new pc.Entity('camera');
-        camera.addComponent('camera', { clearColor: new pc.Color(0.05, 0.05, 0.05, 1.0) });
-        // Ajustamos la distancia (0.8) para que el ave quepa cómodamente en el encuadre inicial
-        camera.translate(0, 0, 0.8); 
+        camera.addComponent('camera', { 
+            clearColor: new pc.Color(0.1, 0.1, 0.1, 1.0),
+            farClip: 100,
+            nearClip: 0.01
+        });
+        camera.translate(0, 0, 1.5); // Alejamos la cámara un poco más por si el ave es grande
         app.root.addChild(camera);
 
-        // 3. AÑADIR LUZ (Crucial para que el Splat sea visible)
-        const light = new pc.Entity('light');
-        light.addComponent('light', {
-            type: 'directional',
-            color: new pc.Color(1, 1, 1),
-            intensity: 1.5
-        });
-        light.setEulerAngles(45, 45, 0);
-        app.root.addChild(light);
-
-        // Control de rotación por Mouse
+        // 4. INTERACCIÓN DE ROTACIÓN (Mejorada para orbitar alrededor del centro)
         let isDragging = false;
         let lastX, lastY;
+        let rotX = 0, rotY = 180; // Iniciar mirando al frente
+
         window.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
         window.addEventListener('mouseup', () => isDragging = false);
         window.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
             let dx = e.clientX - lastX;
             let dy = e.clientY - lastY;
-            camera.rotateLocal(-dy * 0.25, -dx * 0.25, 0);
-            lastX = e.clientX; lastY = e.clientY;
+            
+            rotY += dx * 0.4;
+            rotX += dy * 0.4;
+
+            const ave = app.root.findByName('Ave3D');
+            if (ave) {
+                ave.setLocalEulerAngles(rotX, rotY, 0);
+            }
+
+            lastX = e.clientX; 
+            lastY = e.clientY;
         });
 
-        // 4. CARGA CORRECTA DEL GSPLAT
+        // Soporte para pantallas táctiles (Celulares)
+        if (app.touch) {
+            window.addEventListener('touchstart', (e) => { if(e.touches.length === 1){ isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; } });
+            window.addEventListener('touchend', () => isDragging = false);
+            window.addEventListener('touchmove', (e) => {
+                if (!isDragging || e.touches.length !== 1) return;
+                let dx = e.touches[0].clientX - lastX;
+                let dy = e.touches[0].clientY - lastY;
+                rotY += dx * 0.4; rotX += dy * 0.4;
+                const ave = app.root.findByName('Ave3D');
+                if (ave) ave.setLocalEulerAngles(rotX, rotY, 0);
+                lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+            });
+        }
+
+        // 5. CARGA DINÁMICA DEL ARCHIVO .SPLAT
         app.assets.loadFromUrl(urlDelModelo, "gsplat", function (err, asset) {
             if (err) {
-                console.error(err);
-                document.getElementById("loading").innerText = "Error al cargar el archivo .splat";
+                console.error("Error en carga:", err);
+                document.getElementById("loading").innerText = "Error: No se pudo leer el archivo .splat";
                 return;
             }
+
+            // Ocultar mensaje de carga
             document.getElementById("loading").style.display = "none";
             
-            // Instanciar la entidad del ave ligando el recurso cargado
+            // Crear entidad del modelo
             const aveEntity = new pc.Entity('Ave3D');
+            
+            // CORRECCIÓN CRUCIAL: Asignar la propiedad .resource del asset procesado
             aveEntity.addComponent('gsplat', { 
-                asset: asset.resource // Vincula el recurso directo procesado por PlayCanvas
+                asset: asset.resource 
             });
             
-            aveEntity.setLocalEulerAngles(0, 180, 0); 
+            // Centrar y orientar por defecto
+            aveEntity.setLocalPosition(0, 0, 0);
+            aveEntity.setLocalEulerAngles(rotX, rotY, 0); 
+            
             app.root.addChild(aveEntity);
         });
     </script>
