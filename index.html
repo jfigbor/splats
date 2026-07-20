@@ -4,17 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visor de Avistamiento 3DGS - Aves</title>
-    <!-- Usamos el motor oficial estable de PlayCanvas -->
+    <!-- Cargamos la versión del motor oficial de PlayCanvas -->
     <script src="https://playcanvas.com"></script>
     <style>
-        /* FONDO NEGRO ABSOLUTO */
         body, html { margin: 0; padding: 0; background-color: #000000; overflow: hidden; height: 100%; width: 100%; }
         canvas { display: block; width: 100vw; height: 100vh; background-color: #000000; }
         #loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             font-family: sans-serif; color: #ffffff; font-size: 1.1rem; pointer-events: none;
-            background: rgba(20, 20, 20, 0.85); padding: 18px 30px; border-radius: 6px; 
-            z-index: 10; border: 1px solid #333; text-align: center;
+            background: rgba(15, 15, 15, 0.9); padding: 20px 30px; border-radius: 6px; 
+            z-index: 10; border: 1px solid #222; text-align: center;
         }
     </style>
 </head>
@@ -23,26 +22,26 @@
     <canvas id="application-canvas"></canvas>
 
     <script>
-        // 1. CAPTURA PARÁMETROS Y SOLUCIÓN DE ENLACES EXTERNOS
+        // 1. RESOLVER PARÁMETROS DE URL
         const urlParams = new URLSearchParams(window.location.search);
         let rutaModelo = urlParams.get('ruta');
         
         if (!rutaModelo) {
             document.getElementById("loading").innerText = "Falta el parámetro '?ruta=' en la URL";
-            throw new Error("Falta parámetro");
+            throw new Error("Parámetro ausente");
         }
 
-        // Corrección de rutas raw de GitHub si el usuario pega enlaces de repositorio en lugar de páginas compiladas
+        // Si se pasa una URL de la interfaz web de GitHub por error, la corregimos a datos en bruto
         if (rutaModelo.includes("github.com") && rutaModelo.includes("/tree/")) {
             rutaModelo = rutaModelo.replace("github.com", "://githubusercontent.com").replace("/tree/", "/");
         }
 
-        // Construir la URL final absoluta libre de errores de ámbito
+        // Construir URL absoluta apuntando a tu servidor de GitHub Pages
         const urlDelModelo = rutaModelo.startsWith('http') 
             ? rutaModelo 
             : window.location.origin + window.location.pathname.replace('index.html', '') + rutaModelo;
 
-        // 2. INICIALIZACIÓN DEL MOTOR PLAYCANVAS
+        // 2. INICIALIZAR MOTOR PLAYCANVAS
         const canvas = document.getElementById("application-canvas");
         const app = new pc.Application(canvas, {
             mouse: new pc.Mouse(document.body),
@@ -54,17 +53,17 @@
 
         app.scene.toneMapping = pc.TONEMAP_ACES;
 
-        // 3. CONFIGURAR LA CÁMARA (Mirando sobre el fondo negro)
+        // 3. CONFIGURAR LA CÁMARA (Fondo Negro Puro)
         const camera = new pc.Entity('camera');
         camera.addComponent('camera', { 
-            clearColor: new pc.Color(0, 0, 0, 1), // Negro absoluto nativo del lienzo
+            clearColor: new pc.Color(0, 0, 0, 1),
             farClip: 100,
             nearClip: 0.01
         });
-        camera.translate(0, 0, 1.2); 
+        camera.translate(0, 0, 1.5); // Distancia prudencial de renderizado inicial
         app.root.addChild(camera);
 
-        // Sistema de Órbita y Arrastre del Ave
+        // Controles de Rotación y Órbita
         let isDragging = false;
         let lastX, lastY;
         let rotX = 0, rotY = 180;
@@ -86,31 +85,39 @@
         window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
 
         if (app.touch) {
-            window.addEventListener('touchstart', (e) => { if(e.touches.length === 1) startDrag(e.touches[0].clientX, e.touches[0].clientY); });
+            window.addEventListener('touchstart', (e) => { if(e.touches.length === 1) startDrag(e.touches.clientX, e.touches.clientY); });
             window.addEventListener('touchend', () => isDragging = false);
-            window.addEventListener('touchmove', (e) => { if(e.touches.length === 1) moveDrag(e.touches[0].clientX, e.touches[0].clientY); });
+            window.addEventListener('touchmove', (e) => { if(e.touches.length === 1) moveDrag(e.touches.clientX, e.touches.clientY); });
         }
 
-        // 4. CARGAR RECURSO MEDIANTE EL CONTENEDOR DE CONTENIDO (MÉTODO SEGURO)
-        app.assets.loadFromUrl(urlDelModelo, "gsplat", function (err, asset) {
+        // 4. DESCARGA INMUNE (Carga el archivo como binario en bruto para saltar restricciones MIME)
+        app.assets.loadFromUrl(urlDelModelo, "binary", function (err, asset) {
             if (err) {
-                console.error("Fallo de red o CORS:", err);
-                document.getElementById("loading").innerText = "Error al descargar el archivo .splat (Verifica CORS o la ruta)";
+                console.error("Error crítico de descarga:", err);
+                document.getElementById("loading").innerText = "Error: Archivo no encontrado o bloqueo de servidor.";
                 return;
             }
 
-            // Desvanecer capa de carga
-            document.getElementById("loading").style.display = "none";
+            // Forzar la conversión del recurso descargado a la estructura de tipo "gsplat"
+            asset.type = "gsplat";
             
-            // Instanciar el objeto 3D ligando la estructura de memoria nativa
-            const aveEntity = new pc.Entity('Ave3D');
-            aveEntity.addComponent('gsplat', { 
-                asset: asset.resource || asset
+            // Forzar al motor a compilar el búfer binario en datos de nube de puntos
+            app.assets.load(asset);
+
+            asset.ready(function (loadedAsset) {
+                // Ocultar mensaje de carga
+                document.getElementById("loading").style.display = "none";
+                
+                // Instanciar la entidad e inyectar el recurso procesado en memoria
+                const aveEntity = new pc.Entity('Ave3D');
+                aveEntity.addComponent('gsplat', { 
+                    asset: loadedAsset.resource || loadedAsset
+                });
+                
+                aveEntity.setLocalPosition(0, 0, 0);
+                aveEntity.setLocalEulerAngles(rotX, rotY, 0); 
+                app.root.addChild(aveEntity);
             });
-            
-            aveEntity.setLocalPosition(0, 0, 0);
-            aveEntity.setLocalEulerAngles(rotX, rotY, 0); 
-            app.root.addChild(aveEntity);
         });
     </script>
 </body>
