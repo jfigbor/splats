@@ -6,11 +6,12 @@
     <title>Visor de Avistamiento 3DGS - Aves</title>
     <script src="https://playcanvas.com"></script>
     <style>
-        body { margin: 0; padding: 0; background-color: transparent; overflow: hidden; }
+        body { margin: 0; padding: 0; background-color: #0d0d0d; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; }
         #loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-family: sans-serif; color: #666; font-size: 0.9rem; pointer-events: none;
+            font-family: sans-serif; color: #aaa; font-size: 1rem; pointer-events: none;
+            z-index: 10;
         }
     </style>
 </head>
@@ -19,11 +20,19 @@
     <canvas id="application-canvas"></canvas>
 
     <script>
-        // CAPTURA DINÁMICA: Lee la carpeta y el archivo desde la URL de Blogger
+        // 1. CAPTURA DINÁMICA: Resolver ruta absoluta limpia
         const urlParams = new URLSearchParams(window.location.search);
-        const rutaModelo = urlParams.get('ruta') || 'modelos/tucancito.splat';
-        const urlDelModelo = `./${rutaModelo}`;
+        const rutaModelo = urlParams.get('ruta');
+        
+        if (!rutaModelo) {
+            document.getElementById("loading").innerText = "Falta el parámetro '?ruta=' en la URL";
+            throw new Error("Parámetro ruta ausente.");
+        }
 
+        // Construye la URL apuntando correctamente al archivo de tu servidor local o GitHub Pages
+        const urlDelModelo = window.location.origin + window.location.pathname.replace('index.html', '') + rutaModelo;
+
+        // Inicializar PlayCanvas
         const canvas = document.getElementById("application-canvas");
         const app = new pc.Application(canvas, {
             mouse: new pc.Mouse(document.body),
@@ -35,11 +44,24 @@
 
         app.scene.toneMapping = pc.TONEMAP_ACES;
 
+        // 2. CREAR CÁMARA
         const camera = new pc.Entity('camera');
         camera.addComponent('camera', { clearColor: new pc.Color(0.05, 0.05, 0.05, 1.0) });
-        camera.translate(0, 0, 0.4); 
+        // Ajustamos la distancia (0.8) para que el ave quepa cómodamente en el encuadre inicial
+        camera.translate(0, 0, 0.8); 
         app.root.addChild(camera);
 
+        // 3. AÑADIR LUZ (Crucial para que el Splat sea visible)
+        const light = new pc.Entity('light');
+        light.addComponent('light', {
+            type: 'directional',
+            color: new pc.Color(1, 1, 1),
+            intensity: 1.5
+        });
+        light.setEulerAngles(45, 45, 0);
+        app.root.addChild(light);
+
+        // Control de rotación por Mouse
         let isDragging = false;
         let lastX, lastY;
         window.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
@@ -52,14 +74,21 @@
             lastX = e.clientX; lastY = e.clientY;
         });
 
+        // 4. CARGA CORRECTA DEL GSPLAT
         app.assets.loadFromUrl(urlDelModelo, "gsplat", function (err, asset) {
             if (err) {
+                console.error(err);
                 document.getElementById("loading").innerText = "Error al cargar el archivo .splat";
                 return;
             }
             document.getElementById("loading").style.display = "none";
-            const aveEntity = new pc.Entity();
-            aveEntity.addComponent('gsplat', { asset: asset });
+            
+            // Instanciar la entidad del ave ligando el recurso cargado
+            const aveEntity = new pc.Entity('Ave3D');
+            aveEntity.addComponent('gsplat', { 
+                asset: asset.resource // Vincula el recurso directo procesado por PlayCanvas
+            });
+            
             aveEntity.setLocalEulerAngles(0, 180, 0); 
             app.root.addChild(aveEntity);
         });
