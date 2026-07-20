@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Avistamiento 3DGS - Aves</title>
+    <script src="https://playcanvas.com"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: transparent; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-family: sans-serif; color: #666; font-size: 0.9rem; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Cargando relieve del ave...</div>
+    <canvas id="application-canvas"></canvas>
+
+    <script>
+        // CAPTURA DINÁMICA: Lee la carpeta y el archivo desde la URL de Blogger
+        const urlParams = new URLSearchParams(window.location.search);
+        const rutaModelo = urlParams.get('ruta') || 'modelos/tucancito.splat';
+        const urlDelModelo = `./${rutaModelo}`;
+
+        const canvas = document.getElementById("application-canvas");
+        const app = new pc.Application(canvas, {
+            mouse: new pc.Mouse(document.body),
+            touch: new pc.TouchDevice(document.body)
+        });
+        app.start();
+        app.setCanvasResolution(pc.RESOLUTION_AUTO);
+        window.addEventListener('resize', () => app.resizeCanvas());
+
+        app.scene.toneMapping = pc.TONEMAP_ACES;
+
+        const camera = new pc.Entity('camera');
+        camera.addComponent('camera', { clearColor: new pc.Color(0.05, 0.05, 0.05, 1.0) });
+        camera.translate(0, 0, 0.4); 
+        app.root.addChild(camera);
+
+        let isDragging = false;
+        let lastX, lastY;
+        window.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+        window.addEventListener('mouseup', () => isDragging = false);
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            let dx = e.clientX - lastX;
+            let dy = e.clientY - lastY;
+            camera.rotateLocal(-dy * 0.25, -dx * 0.25, 0);
+            lastX = e.clientX; lastY = e.clientY;
+        });
+
+        app.assets.loadFromUrl(urlDelModelo, "gsplat", function (err, asset) {
+            if (err) {
+                document.getElementById("loading").innerText = "Error al cargar el archivo .splat";
+                return;
+            }
+            document.getElementById("loading").style.display = "none";
+            const aveEntity = new pc.Entity();
+            aveEntity.addComponent('gsplat', { asset: asset });
+            aveEntity.setLocalEulerAngles(0, 180, 0); 
+            app.root.addChild(aveEntity);
+        });
+    </script>
+</body>
+</html>
